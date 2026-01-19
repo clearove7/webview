@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 void main() => runApp(const MyApp());
@@ -11,62 +10,25 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: WebViewNavigationEventsPage(),
+      home: JavaScriptIntegrationChallengePage(),
     );
   }
 }
 
-class WebViewNavigationEventsPage extends StatefulWidget {
-  const WebViewNavigationEventsPage({super.key});
+class JavaScriptIntegrationChallengePage extends StatefulWidget {
+  const JavaScriptIntegrationChallengePage({super.key});
 
   @override
-  State<WebViewNavigationEventsPage> createState() =>
-      _WebViewNavigationEventsPageState();
+  State<JavaScriptIntegrationChallengePage> createState() =>
+      _JavaScriptIntegrationChallengePageState();
 }
 
-class _WebViewNavigationEventsPageState
-    extends State<WebViewNavigationEventsPage> {
+class _JavaScriptIntegrationChallengePageState
+    extends State<JavaScriptIntegrationChallengePage> {
   late final WebViewController _controller;
 
   bool _isLoading = true;
-
-  // ✅ 你的 HTML（内嵌在 main.dart 里）
-  static const String _myHtmlString = '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Asset WebView</title>
-  <style>
-    body {
-      font-family: Arial;
-      background-color: #f2f2f2;
-      padding: 20px;
-      text-align: center;
-    }
-    h1 {
-      color: #2196F3;
-    }
-    button {
-      padding: 10px 20px;
-      background-color: #2196F3;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Asset WebView Page 👋</h1>
-  <p>This HTML file is loaded from <b>HTML String inside main.dart</b></p>
-
-  <button onclick="alert('Hello from Asset WebView!')">
-    Click Me
-  </button>
-</body>
-</html>
-''';
+  String _totalFromJs = '-';
 
   @override
   void initState() {
@@ -74,82 +36,74 @@ class _WebViewNavigationEventsPageState
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+
+      // ✅ Step 2: Receive data from JS on name "FlutterChannel"
+      ..addJavaScriptChannel(
+        'FlutterChannel',
+        onMessageReceived: (JavaScriptMessage message) {
+          setState(() {
+            _totalFromJs = message.message; // e.g. "Total: $120"
+          });
+        },
+      )
+
+      // ✅ Events + Navigation control
       ..setNavigationDelegate(
         NavigationDelegate(
-          // ✅ HUD：onPageStarted 显示
-          onPageStarted: (url) {
-            print("Page started loading: $url");
-            setState(() => _isLoading = true);
-          },
-          // ✅ HUD：onPageFinished 关闭
-          onPageFinished: (url) {
-            print("Page finished loading: $url");
-            setState(() => _isLoading = false);
-          },
-
-          // ✅ 导航控制：允许 flutter.dev + docs.flutter.dev
-          // （你加载本地 HTML 时不受这个限制；只对网络跳转有效）
+          onPageStarted: (url) => setState(() => _isLoading = true),
+          onPageFinished: (url) => setState(() => _isLoading = false),
           onNavigationRequest: (request) {
             final url = request.url;
 
-            final allowFlutter = url.startsWith("https://flutter.dev");
-            final allowDocs = url.startsWith("https://docs.flutter.dev");
+            // allow local asset / internal schemes
+            if (!url.startsWith('http')) return NavigationDecision.navigate;
 
-            if (allowFlutter || allowDocs) {
+            // allow flutter + docs.flutter
+            if (url.startsWith('https://flutter.dev') ||
+                url.startsWith('https://docs.flutter.dev')) {
               return NavigationDecision.navigate;
             }
 
-            // 其他网址拦截
-            print("Blocked navigation to: $url");
             return NavigationDecision.prevent;
           },
         ),
-      );
+      )
 
-    // ✅ 默认先加载：你的 HTML String
-    _controller.loadHtmlString(_myHtmlString);
+      // ✅ Step 1: Show HTML inside webview (from assets/index.html)
+      ..loadFlutterAsset('assets/index.html');
   }
 
-  Future<void> _loadFromAsset() async {
-    // 如果你还想从 assets/index.html 加载（可选）
-    final html = await rootBundle.loadString('assets/index.html');
-    await _controller.loadHtmlString(html);
+  int _extractTotalNumber(String text) {
+    // text example: "Total: $120"
+    final match = RegExp(r'(\d+)').firstMatch(text);
+    return int.tryParse(match?.group(1) ?? '0') ?? 0;
   }
 
-  Future<void> _loadFromHtmlString() async {
-    await _controller.loadHtmlString(_myHtmlString);
+  // ✅ Step 3: Send data from flutter to JS via "updateTotalFromFlutter"
+  Future<void> _sendPlus100ToJs() async {
+    final current = _extractTotalNumber(_totalFromJs);
+    final newTotal = current + 100;
+
+    await _controller.runJavaScript("updateTotalFromFlutter($newTotal);");
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("WebView Navigation & Events"),
+        title: const Text('JavaScript Integration'),
         actions: [
-          IconButton(
-            tooltip: "Load HTML String",
-            icon: const Icon(Icons.code),
-            onPressed: _loadFromHtmlString,
-          ),
-          IconButton(
-            tooltip: "Load Asset HTML",
-            icon: const Icon(Icons.folder),
-            onPressed: _loadFromAsset,
-          ),
           IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () async {
-              if (await _controller.canGoBack()) {
-                await _controller.goBack();
-              }
+              if (await _controller.canGoBack()) await _controller.goBack();
             },
           ),
           IconButton(
             icon: const Icon(Icons.arrow_forward),
             onPressed: () async {
-              if (await _controller.canGoForward()) {
+              if (await _controller.canGoForward())
                 await _controller.goForward();
-              }
             },
           ),
           IconButton(
@@ -160,17 +114,40 @@ class _WebViewNavigationEventsPageState
       ),
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
+          Column(
+            children: [
+              Expanded(child: WebViewWidget(controller: _controller)),
+
+              // Flutter UI part (Step 2 + Step 3)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  border: Border(top: BorderSide(color: Colors.grey.shade300)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Received from JS: $_totalFromJs'),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed:
+                            _totalFromJs == '-' ? null : _sendPlus100ToJs,
+                        child: const Text('Send +100 total from Flutter to JS'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           if (_isLoading)
             Container(
               color: Colors.black.withOpacity(0.15),
-              child: const Center(
-                child: SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: CircularProgressIndicator(),
-                ),
-              ),
+              child: const Center(child: CircularProgressIndicator()),
             ),
         ],
       ),
